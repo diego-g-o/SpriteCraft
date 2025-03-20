@@ -1,0 +1,662 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "forge-std/Test.sol";
+import "./block_00_setup.t.sol";
+
+/// @title ArtProject01 Minting Functionality Tests
+/// @author Diego
+/// @notice Unit testing fot the mintNFT function of the ArtProject01 contract
+/// @dev Contains comprehensive unit tests for all mintNFT edge cases and requirements
+contract ArtProject01Test is ArtProjectTestSetup {
+    /**
+     * ================================================================================
+     *             test_MintNFT_RevertWhen_CalledByContract
+     * ================================================================================
+     */
+
+    /// @notice Tests that mintNFT reverts when called by a contract
+    /// @dev Verifies the EOA check in the mintNFT function by calling it from the test contract
+    function test_MintNFT_01_RevertWhen_CalledByContract() public {
+        // Setup
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Disable test mode to enforce EOA check
+        vm.prank(owner);
+        artProject.setTestMode(false);
+
+        // Expect revert with NotEOA error
+        vm.expectRevert(ArtProject01.NotEOA.selector);
+
+        // Action - call from contract (this test contract)
+        artProject.mintNFT(artData);
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_RevertWhen_MintingStopped
+     * ================================================================================
+     */
+
+    /// @notice Tests that mintNFT reverts when minting is stopped
+    /// @dev Verifies that the contract correctly prevents minting when stopMinting has been called
+    function test_MintNFT_02_evertWhen_MintingStopped() public {
+        // Setup
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Stop minting
+        vm.prank(owner);
+        artProject.stopMinting();
+
+        // Expect revert with "Minting is stopped"
+        vm.startPrank(randomUser);
+        vm.expectRevert("Minting is stopped");
+
+        // Action
+        artProject.mintNFT(artData);
+        vm.stopPrank();
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_RevertWhen_NotInMintingState
+     * ================================================================================
+     */
+
+    /// @notice Tests that mintNFT reverts when not in the Minting state
+    /// @dev Verifies the inState modifier by attempting to mint while in Idle state
+    function test_MintNFT_03_RevertWhen_NotInMintingState() public {
+        // Setup - ensure we're in Idle state
+        bytes32 artData = bytes32(
+            uint256(
+                0x00000000000000000000000000000000000000000000000000000000FFFF0000
+            )
+        );
+
+        // Verify we're in Idle state
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should be Idle"
+        );
+
+        // Expect revert with InvalidMintingState error
+        vm.startPrank(randomUser);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ArtProject01.InvalidMintingState.selector,
+                ArtProject01.MintingState.Minting,
+                ArtProject01.MintingState.Idle
+            )
+        );
+
+        // Action
+        artProject.mintNFT(artData);
+        vm.stopPrank();
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_RevertWhen_NotCurrentMinter
+     * ================================================================================
+     */
+
+    /// @notice Tests that mintNFT reverts when called by someone other than the current minter
+    /// @dev Verifies the onlyMinter modifier by attempting to mint from a non-minter address
+    function test_MintNFT_04_RevertWhen_NotCurrentMinter() public {
+        // Setup - start minting with randomUser
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Try to mint with a different user
+        vm.startPrank(testUser);
+        vm.expectRevert("Not the current minter");
+
+        // Action
+        artProject.mintNFT(artData);
+        vm.stopPrank();
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_RevertWhen_MintingExpired
+     * ================================================================================
+     */
+
+    /// @notice Tests that mintNFT reverts when the minting window has expired
+    /// @dev Verifies the expiration check by fast-forwarding time past the expiry
+    function test_MintNFT_05_RevertWhen_MintingExpired() public {
+        // Setup
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Fast forward time to expire the minting window
+        uint256 expiryTime = artProject.mintingExpiry();
+        vm.warp(expiryTime + 1);
+
+        // Expect revert with MintingHasExpired error
+        vm.startPrank(randomUser);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ArtProject01.MintingHasExpired.selector,
+                randomUser
+            )
+        );
+
+        // Action
+        artProject.mintNFT(artData);
+        vm.stopPrank();
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_RevertWhen_ArtNotUnique
+     * ================================================================================
+     */
+
+    /// @notice Tests that mintNFT reverts when attempting to mint non-unique art
+    /// @dev Verifies the uniqueness check by attempting to mint the same art data twice
+    function test_MintNFT_06_RevertWhen_ArtNotUnique() public {
+        // Setup - start minting with randomUser
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Give user enough pixels and ETH
+        _giveUserPixels(randomUser, 100);
+
+        // First mint should succeed
+        vm.startPrank(randomUser);
+        artProject.mintNFT{value: artProject.currentPrice()}(artData);
+        vm.stopPrank();
+
+        // Try to mint the same art again
+        bytes32 sameArtData = artData;
+
+        // Setup for second mint
+        _setupForMinting(testUser);
+        _giveUserPixels(testUser, 100);
+        uint256 _currentPrice = artProject.currentPrice();
+
+        // Expect revert with ArtAlreadyMinted error
+        vm.startPrank(testUser);
+        vm.expectRevert(ArtProject01.ArtAlreadyMinted.selector);
+
+        // Action
+        artProject.mintNFT{value: _currentPrice}(sameArtData);
+        vm.stopPrank();
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_CountBlackPixels
+     * ================================================================================
+     */
+
+    /// @notice Tests the countBlackPixels function with known values
+    /// @dev Verifies that the function correctly counts the number of set bits in the art data
+    function test_MintNFT_07_CountBlackPixels() public {
+        // Create art data with a known number of black pixels
+        // This has exactly 16 bits set to 1
+        bytes32 artData = bytes32(
+            uint256(
+                0x00000000000000000000000000000000000000000000000000000000FFFF0000
+            )
+        );
+
+        // Verify the count
+        uint256 pixelCount = artProject.countBlackPixels(artData);
+        assertEq(pixelCount, 16, "Should count 16 black pixels");
+
+        // Create another art with different pixel count
+        // This has exactly 8 bits set to 1
+        bytes32 artData2 = bytes32(
+            uint256(
+                0x00000000000000000000000000000000000000000000000000000000FF000000
+            )
+        );
+
+        // Verify the count
+        uint256 pixelCount2 = artProject.countBlackPixels(artData2);
+        assertEq(pixelCount2, 8, "Should count 8 black pixels");
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_RevertWhenx_NotEnoughAvailablePixels
+     * ================================================================================
+     */
+
+    /// @notice Tests that mintNFT reverts when the user doesn't have enough available pixels
+    /// @dev Verifies the pixel availability check by giving the user fewer pixels than needed
+    function test_MintNFT_08_RevertWhenx_NotEnoughAvailablePixels() public {
+        // Setup
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Calculate how many pixels are needed
+        uint256 pixelsNeeded = artProject.countBlackPixels(artData);
+
+        uint256 currentPrice = artProject.currentPrice();
+
+        // Give user fewer pixels than needed
+        _giveUserPixels(randomUser, pixelsNeeded - 1);
+
+        // Verify user's available pixels
+        uint256 availablePixels = artProject.availablePixels(randomUser);
+        assertLt(
+            availablePixels,
+            pixelsNeeded,
+            "User should have fewer pixels than needed"
+        );
+
+        // Expect revert with NotEnoughAvailablePixels error
+        vm.startPrank(randomUser);
+        vm.expectRevert(ArtProject01.NotEnoughAvailablePixels.selector);
+
+        // Action
+        artProject.mintNFT{value: currentPrice}(artData);
+        vm.stopPrank();
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_RevertWhen_InsufficientETH
+     * ================================================================================
+     */
+
+    /// @notice Tests that mintNFT reverts when insufficient ETH is sent
+    /// @dev Verifies the payment check by sending less ETH than required
+    function test_MintNFT_09_RevertWhen_InsufficientETH() public {
+        // Setup
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Give user enough pixels
+        _giveUserPixels(randomUser, 100);
+
+        // Calculate required price. The START_MINTING_FEE should be substracted as per contract logic
+        uint256 requiredPrice = (artProject.currentPrice() -
+            artProject.START_MINTING_FEE());
+        uint256 insufficientPrice = requiredPrice - 1;
+
+        // Expect revert with InsufficientETHSent error
+        vm.startPrank(randomUser);
+        vm.expectRevert(ArtProject01.InsufficientETHSent.selector);
+
+        // Action
+        artProject.mintNFT{value: insufficientPrice}(artData);
+        vm.stopPrank();
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_PriceIncrement
+     * ================================================================================
+     */
+
+    /// @notice Tests that the price increases after multiple NFTs are minted
+    /// @dev Verifies the price calculation logic by minting multiple NFTs and checking the price
+    function test_MintNFT_10_PriceIncrement() public {
+        // Setup - manipulate time to advance ideal supply
+        vm.warp(deploymentTime);
+        uint256 basePrice = artProject.BASE_PRICE();
+
+        // Mint several NFTs to exceed ideal supply
+        for (uint i = 0; i < 5; i++) {
+            address user = address(uint160(0x1000 + i));
+            vm.deal(user, 10 ether);
+
+            // Give user pixels
+            _giveUserPixels(user, 100);
+
+            // Start minting
+            vm.startPrank(user);
+            artProject.startMinting{value: artProject.START_MINTING_FEE()}();
+
+            // Create unique art for each user
+            bytes32 artData = bytes32(
+                uint256(
+                    0x00000000000000000000000000000000000000000000000000000000FFFF0000
+                ) + i
+            );
+
+            // Get current price
+            uint256 currentPrice = artProject.currentPrice();
+
+            // Mint NFT
+            artProject.mintNFT{value: currentPrice}(artData);
+            vm.stopPrank();
+        }
+
+        // Fast forward time to create a gap between ideal and actual supply
+        vm.warp(deploymentTime); // Reset to start
+
+        // Check that price has increased
+        uint256 newPrice = artProject.currentPrice();
+        assertGt(
+            newPrice,
+            basePrice,
+            "Price should increase after minting multiple NFTs"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_StateChanges
+     * ================================================================================
+     */
+
+    /// @notice Tests the state changes after a successful mint
+    /// @dev Verifies that all state variables are updated correctly after minting
+    function test_MintNFT_11_StateChanges() public {
+        // Setup
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Give user enough pixels
+        uint256 initialPixels = 100;
+        _giveUserPixels(randomUser, initialPixels);
+
+        // Record initial state
+        uint256 initialTokenCounter = artProject.tokenCounter();
+        uint256 initialSpentPixels = artProject.spentPixels(randomUser);
+        bool initialArtMinted = artProject.mintedArts(artData);
+
+        // Mint NFT
+        vm.startPrank(randomUser);
+        artProject.mintNFT{value: artProject.currentPrice()}(artData);
+        vm.stopPrank();
+
+        // Verify state changes
+        uint256 pixelCount = artProject.countBlackPixels(artData);
+
+        // Check spent pixels increased
+        assertEq(
+            artProject.spentPixels(randomUser),
+            initialSpentPixels + pixelCount,
+            "Spent pixels should increase by the black pixel count"
+        );
+
+        // Check token counter increased
+        assertEq(
+            artProject.tokenCounter(),
+            initialTokenCounter + 1,
+            "Token counter should increase by 1"
+        );
+
+        // Check art is marked as minted
+        assertTrue(
+            artProject.mintedArts(artData),
+            "Art should be marked as minted"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_StateReset
+     * ================================================================================
+     */
+
+    /// @notice Tests that the minting state is reset after a successful mint
+    /// @dev Verifies that the minting state, current minter, and expiry are reset
+    function test_MintNFT_12_StateReset() public {
+        // Setup
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Give user enough pixels
+        _giveUserPixels(randomUser, 100);
+
+        // Verify initial minting state
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "Initial state should be Minting"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            randomUser,
+            "Current minter should be set"
+        );
+        assertTrue(
+            artProject.mintingExpiry() > 0,
+            "Minting expiry should be set"
+        );
+
+        // Mint NFT
+        vm.startPrank(randomUser);
+        artProject.mintNFT{value: artProject.currentPrice()}(artData);
+        vm.stopPrank();
+
+        // Verify state reset
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should reset to Idle"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            address(0),
+            "Current minter should be reset"
+        );
+        assertEq(
+            artProject.mintingExpiry(),
+            0,
+            "Minting expiry should be reset"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_SuccessfulMinting
+     * ================================================================================
+     */
+
+    /// @notice Tests a complete successful minting flow
+    /// @dev Verifies all aspects of a successful mint including events, state changes, and ownership
+    function test_MintNFT_13_SuccessfulMinting() public {
+        // Setup
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Give user enough pixels
+        uint256 initialPixels = 100;
+        _giveUserPixels(randomUser, initialPixels);
+
+        // Record initial state
+        uint256 initialTokenCounter = artProject.tokenCounter();
+        uint256 initialSpentPixels = artProject.spentPixels(randomUser);
+
+        // Calculate required price
+        uint256 requiredPrice = artProject.currentPrice();
+
+        // Expect NFTMinted event
+        vm.expectEmit(true, true, true, true);
+        emit ArtProject01.NFTMinted(randomUser, initialTokenCounter, artData);
+
+        // Mint NFT
+        vm.startPrank(randomUser);
+        artProject.mintNFT{value: requiredPrice}(artData);
+        vm.stopPrank();
+
+        // Verify all state changes
+        uint256 pixelCount = artProject.countBlackPixels(artData);
+
+        // Check NFT ownership
+        assertEq(
+            artProject.ownerOf(initialTokenCounter),
+            randomUser,
+            "NFT should be owned by minter"
+        );
+
+        // Check spent pixels increased
+        assertEq(
+            artProject.spentPixels(randomUser),
+            initialSpentPixels + pixelCount,
+            "Spent pixels should increase by the black pixel count"
+        );
+
+        // Check token counter increased
+        assertEq(
+            artProject.tokenCounter(),
+            initialTokenCounter + 1,
+            "Token counter should increase by 1"
+        );
+
+        // Check art is marked as minted
+        assertTrue(
+            artProject.mintedArts(artData),
+            "Art should be marked as minted"
+        );
+
+        // Check minting state reset
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should reset to Idle"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            address(0),
+            "Current minter should be reset"
+        );
+        assertEq(
+            artProject.mintingExpiry(),
+            0,
+            "Minting expiry should be reset"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_MintNFT_RevertWhen_MaxSupplyReached
+     * ================================================================================
+     */
+
+    /// @notice Tests that mintNFT reverts when the maximum supply is reached
+    /// @dev Manipulates the token counter to simulate reaching max supply and verifies the revert
+    function test_MintNFT_14_RevertWhen_MaxSupplyReached() public {
+        // Setup - manipulate tokenCounter to reach max supply
+        uint256 maxSupply = artProject.MAX_SUPPLY();
+        uint256 tokenCounterSlot = 16;
+        uint256 currentPrice = artProject.currentPrice();
+
+        // Modify the storage using the correct slot
+        vm.store(
+            address(artProject),
+            bytes32(tokenCounterSlot),
+            bytes32(maxSupply)
+        );
+
+        // Verify tokenCounter is at max supply
+        assertEq(
+            artProject.tokenCounter(),
+            maxSupply,
+            "Token counter should be at max supply"
+        );
+
+        // Setup for minting
+        bytes32 artData = _setupForMinting(randomUser);
+        _giveUserPixels(randomUser, 100);
+
+        // Expect revert with MaxSupplyReached error
+        vm.startPrank(randomUser);
+        vm.expectRevert(ArtProject01.MaxSupplyReached.selector);
+
+        // Action
+        artProject.mintNFT{value: currentPrice}(artData);
+        vm.stopPrank();
+    }
+
+    /**
+     * ================================================================================
+     *            HELPER FUNCTION: findTokenCounterSlot
+     * ================================================================================
+     */
+    /**
+     * 
+
+     /**
+     * @notice Helper function to find the storage slot for tokenCounter
+     * @param n Number of tokens to mint
+     * @param x Number of slots to check
+     * @return slot The storage slot that contains the value n
+     */
+
+    /*
+    function findTokenCounterSlot(
+        uint256 n,
+        uint256 x
+    ) public returns (uint256 slot) {
+        // First, mint n tokens
+        for (uint256 i = 0; i < n; i++) {
+            // Create a unique user for each mint
+            address user = address(uint160(0x1000 + i));
+            vm.deal(user, 10 ether);
+
+            // Give user pixels
+            _giveUserPixels(user, 100);
+
+            // Start minting
+            vm.startPrank(user);
+            artProject.startMinting{value: artProject.START_MINTING_FEE()}();
+
+            // Create unique art for each user
+            bytes32 artData = bytes32(
+                uint256(
+                    0x00000000000000000000000000000000000000000000000000000000FFFF0000
+                ) + i
+            );
+
+            // Mint NFT
+            artProject.mintNFT{value: artProject.currentPrice()}(artData);
+            vm.stopPrank();
+        }
+
+        // Verify we minted exactly n tokens
+        assertEq(
+            artProject.tokenCounter(),
+            n,
+            "Should have minted exactly n tokens"
+        );
+        console.log("Successfully minted", n, "tokens");
+
+        // Now scan the first x slots to find which one equals n
+        for (uint256 i = 0; i < x; i++) {
+            bytes32 slotValue = vm.load(address(artProject), bytes32(i));
+            uint256 value = uint256(slotValue);
+
+            console.log("Slot", i, "value:", value);
+
+            if (value == n) {
+                console.log("Found tokenCounter at slot", i);
+                return i;
+            }
+        }
+
+        // If we didn't find a match
+        console.log("No matching slot found in the first", x, "slots");
+        return type(uint256).max; // Return max uint as an error indicator
+    }
+
+    function testHelper_00_FindTokenCounterSlot() public {
+        // Find the slot where tokenCounter is stored by minting 5 tokens and checking the first 20 slots
+        uint256 tokenCounterSlot = findTokenCounterSlot(13, 20);
+
+        // Verify the slot was found
+        require(tokenCounterSlot != type(uint256).max, "Slot not found");
+
+        // Verify we can manipulate the tokenCounter by writing to this slot
+        uint256 newValue = 10;
+        vm.store(
+            address(artProject),
+            bytes32(tokenCounterSlot),
+            bytes32(newValue)
+        );
+
+        // Check if tokenCounter was updated
+        assertEq(
+            artProject.tokenCounter(),
+            newValue,
+            "Failed to update tokenCounter"
+        );
+
+        console.log(
+            "Successfully verified tokenCounter is at slot",
+            tokenCounterSlot
+        );
+    }
+    */
+}

@@ -1,0 +1,191 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "forge-std/Test.sol";
+import "./block_00_setup.t.sol";
+
+/// @title ArtProject01 Stop Minting Functionality Tests
+/// @author Claude
+/// @notice Unit testing for the stopMinting function of the ArtProject01 contract
+/// @dev Contains comprehensive unit tests for all stopMinting edge cases and requirements
+contract ArtProject01StopMintingTest is ArtProjectTestSetup {
+    /**
+     * ================================================================================
+     *             test_StopMinting_SuccessfulExecution
+     * ================================================================================
+     */
+
+    /// @notice Tests that stopMinting successfully sets mintingStopped to true
+    /// @dev Verifies that the function correctly updates the state when called by the owner
+    function test_StopMinting_01_SuccessfulExecution() public {
+        // Setup - verify initial state
+        assertEq(
+            artProject.mintingStopped(),
+            false,
+            "Minting should not be stopped initially"
+        );
+
+        // Expect MintingHasStopped event
+        vm.expectEmit(true, true, true, true);
+        emit ArtProject01.MintingHasStopped(true);
+
+        // Action - call stopMinting as owner
+        vm.prank(owner);
+        artProject.stopMinting();
+
+        // Verify state change
+        assertEq(
+            artProject.mintingStopped(),
+            true,
+            "Minting should be stopped after function call"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_StopMinting_RevertWhen_CalledByNonAdmin
+     * ================================================================================
+     */
+
+    /// @notice Tests that stopMinting reverts when called by a non-admin user
+    /// @dev Verifies the access control in the stopMinting function
+    function test_StopMinting_02_RevertWhen_CalledByNonAdmin() public {
+        // Setup - verify caller doesn't have admin role
+        bytes32 adminRole = 0x00;
+        assertFalse(
+            artProject.hasRole(adminRole, randomUser),
+            "Random user should not have DEFAULT_ADMIN_ROLE"
+        );
+
+        // Expect revert with missing role error
+        bytes32 defaultAdminRole = 0x00; // DEFAULT_ADMIN_ROLE is 0x00
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                randomUser,
+                defaultAdminRole
+            )
+        );
+
+        // Action - call stopMinting as non-admin
+        vm.prank(randomUser);
+        artProject.stopMinting();
+    }
+
+    /**
+     * ================================================================================
+     *             test_StopMinting_PreventsMinting
+     * ================================================================================
+     */
+
+    /// @notice Tests that after stopMinting is called, minting functions are disabled
+    /// @dev Verifies that the whenNotStopped modifier works correctly after stopMinting
+    function test_StopMinting_03_PreventsMinting() public {
+        // Setup - stop minting
+        uint256 startMintingFee = artProject.START_MINTING_FEE();
+        vm.prank(owner);
+        artProject.stopMinting();
+
+        // Verify minting is stopped
+        assertTrue(artProject.mintingStopped(), "Minting should be stopped");
+
+        // Try to start minting - should revert
+        vm.startPrank(randomUser);
+        vm.deal(randomUser, 1 ether);
+        vm.expectRevert("Minting is stopped");
+        artProject.startMinting{value: startMintingFee}();
+        vm.stopPrank();
+    }
+
+    /**
+     * ================================================================================
+     *             test_StopMinting_CanBeCalledByAdmin
+     * ================================================================================
+     */
+
+    /// @notice Tests that stopMinting can be called by an account with ADMIN_ROLE
+    /// @dev Verifies that accounts with DEFAULT_ADMIN_ROLE can call stopMinting
+    function test_StopMinting_04_CanBeCalledByAdmin() public {
+        // Setup - verify initial state
+        assertEq(
+            artProject.mintingStopped(),
+            false,
+            "Minting should not be stopped initially"
+        );
+
+        // Expect MintingHasStopped event
+        vm.expectEmit(true, true, true, true);
+        emit ArtProject01.MintingHasStopped(true);
+
+        // Action - call stopMinting as admin
+        vm.prank(owner);
+        artProject.stopMinting();
+
+        // Verify state change
+        assertEq(
+            artProject.mintingStopped(),
+            true,
+            "Minting should be stopped after function call"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_StopMinting_CanBeCalledInTestMode
+     * ================================================================================
+     */
+
+    /// @notice Tests that stopMinting can be called by a contract in test mode
+    /// @dev Verifies that the EOA check is bypassed when test mode is enabled
+    function test_StopMinting_05_CanBeCalledInTestMode() public {
+        // Setup - enable test mode
+        vm.prank(owner);
+        artProject.setTestMode(true);
+
+        // Action - call stopMinting as owner
+        vm.prank(owner);
+        artProject.stopMinting();
+
+        // Verify state change
+        assertEq(
+            artProject.mintingStopped(),
+            true,
+            "Minting should be stopped after function call"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_StopMinting_PermanentEffect
+     * ================================================================================
+     */
+
+    /// @notice Tests that the effect of stopMinting is permanent
+    /// @dev Verifies that once minting is stopped, it cannot be restarted
+    function test_StopMinting_06_PermanentEffect() public {
+        // Setup - stop minting
+        uint256 startMintingFee = artProject.START_MINTING_FEE();
+        vm.deal(randomUser, 1 ether);
+        vm.prank(owner);
+        artProject.stopMinting();
+
+        // Verify minting is stopped
+        assertTrue(artProject.mintingStopped(), "Minting should be stopped");
+
+        // Try to "restart" minting by calling stopMinting again
+        vm.prank(owner);
+        artProject.stopMinting();
+
+        // Verify minting is still stopped
+        assertTrue(
+            artProject.mintingStopped(),
+            "Minting should remain stopped"
+        );
+
+        // Try to mint - should still be prevented
+        vm.startPrank(randomUser);
+        vm.expectRevert("Minting is stopped");
+        artProject.startMinting{value: startMintingFee}();
+        vm.stopPrank();
+    }
+}

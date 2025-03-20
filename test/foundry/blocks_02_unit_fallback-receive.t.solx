@@ -1,0 +1,187 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "forge-std/Test.sol";
+import "./block_00_setup.t.sol";
+
+/// @title ArtProject01 Fallback and Receive Function Tests
+/// @author Claude + Diego
+/// @notice Unit testing for the fallback and receive functions of the ArtProject01 contract
+/// @dev Contains comprehensive unit tests for fallback and receive function behavior
+contract ArtProject01FallbackReceiveTest is ArtProjectTestSetup {
+    /**
+     * ================================================================================
+     *             test_Fallback_RevertsWithMessage
+     * ================================================================================
+     */
+
+    /// @notice Tests that the fallback function reverts with the correct error message
+    /// @dev Verifies that any call with data that doesn't match a function signature reverts
+    function test_Fallback_01_RevertsWithMessage() public {
+        // Setup - prepare a call with data that doesn't match any function signature
+        bytes memory randomData = abi.encodeWithSignature(
+            "nonExistentFunction()"
+        );
+
+        // Expect revert with the specific error message
+        vm.expectRevert("Fallback transactions not allowed");
+
+        // Action - make a low-level call with the random data
+        (bool success, ) = address(artProject).call(randomData);
+        // The test will fail if the call succeeds or if it reverts with a different message
+    }
+
+    /**
+     * ================================================================================
+     *             test_Fallback_RevertsWithMessageAndValue
+     * ================================================================================
+     */
+
+    /// @notice Tests that the fallback function reverts when called with ETH and data
+    /// @dev Verifies that calls with both value and data that don't match a function signature revert
+    function test_Fallback_02_RevertsWithMessageAndValue() public {
+        // Setup - prepare a call with data and value
+        bytes memory randomData = abi.encodeWithSignature(
+            "randomFunction(uint256)",
+            123
+        );
+        uint256 value = 0.1 ether;
+
+        // Fund the test contract
+        vm.deal(address(this), value);
+
+        // Expect revert with the specific error message
+        vm.expectRevert("Fallback transactions not allowed");
+
+        // Action - make a low-level call with the random data and value
+        (bool success, ) = address(artProject).call{value: value}(randomData);
+        // The test will fail if the call succeeds or if it reverts with a different message
+    }
+
+    /**
+     * ================================================================================
+     *             test_Fallback_RevertsWithEmptyData
+     * ================================================================================
+     */
+
+    /// @notice Tests that the fallback function reverts when called with empty data
+    /// @dev Verifies that calls with empty data but not empty calldata revert
+    function test_Fallback_03_RevertsWithEmptyData() public {
+        // Setup - prepare an empty bytes array (not the same as no calldata)
+        bytes memory emptyData = new bytes(0);
+
+        // Expect revert with the specific error message
+        vm.expectRevert("Fallback transactions not allowed");
+
+        // Action - make a low-level call with empty data
+        (bool success, ) = address(artProject).call(emptyData);
+        // The test will fail if the call succeeds or if it reverts with a different message
+    }
+
+    /**
+     * ================================================================================
+     *             test_Receive_RevertsWithMessage
+     * ================================================================================
+     */
+
+    /// @notice Tests that the receive function reverts with the correct error message
+    /// @dev Verifies that direct ETH transfers without data revert
+    function test_Receive_01_RevertsWithMessage() public {
+        // Setup - fund the test contract
+        uint256 value = 0.1 ether;
+        vm.deal(address(this), value);
+
+        // Expect revert with the specific error message
+        vm.expectRevert("Direct ETH transfers not allowed");
+
+        // Action - make a direct ETH transfer without data
+        (bool success, ) = address(artProject).call{value: value}("");
+        // The test will fail if the call succeeds or if it reverts with a different message
+    }
+
+    /**
+     * ================================================================================
+     *             test_Receive_RevertsWithZeroValue
+     * ================================================================================
+     */
+
+    /// @notice Tests that the receive function reverts even with zero ETH
+    /// @dev Verifies that direct transfers of 0 ETH without data also revert
+    function test_Receive_02_RevertsWithZeroValue() public {
+        // Expect revert with the specific error message
+        vm.expectRevert("Direct ETH transfers not allowed");
+
+        // Action - make a direct transfer of 0 ETH without data
+        (bool success, ) = address(artProject).call{value: 0}("");
+        // The test will fail if the call succeeds or if it reverts with a different message
+    }
+
+    /**
+     * ================================================================================
+     *             test_Receive_RevertsFromDifferentAccounts
+     * ================================================================================
+     */
+
+    /// @notice Tests that the receive function reverts when called from different accounts
+    /// @dev Verifies that the receive function reverts regardless of the caller
+    function test_Receive_03_RevertsFromDifferentAccounts() public {
+        // Setup - fund the random user
+        uint256 value = 0.1 ether;
+        vm.deal(randomUser, value);
+
+        // Expect revert with the specific error message
+        vm.prank(randomUser);
+        vm.expectRevert("Direct ETH transfers not allowed");
+
+        // Action - make a direct ETH transfer from random user
+        (bool success, ) = address(artProject).call{value: value}("");
+        // The test will fail if the call succeeds or if it reverts with a different message
+    }
+
+    /**
+     * ================================================================================
+     *             test_Receive_RevertsWithSendAndTransfer
+     * ================================================================================
+     */
+
+    /// @notice Tests that the receive function reverts when using send or transfer
+    /// @dev Verifies that both send and transfer methods revert as expected
+    function test_Receive_04_RevertsWithSendAndTransfer() public {
+        // Setup - fund the test contract
+        uint256 value = 0.1 ether;
+        vm.deal(address(this), value);
+
+        // Test transfer method
+        vm.expectRevert("Direct ETH transfers not allowed");
+        payable(address(artProject)).transfer(value);
+
+        // Test send method
+        bool sendResult = payable(address(artProject)).send(value);
+        assertEq(sendResult, false, "Send should fail");
+    }
+
+    /**
+     * ================================================================================
+     *             test_ValidFunctionCallsStillWork
+     * ================================================================================
+     */
+
+    /// @notice Tests that valid function calls still work despite fallback/receive restrictions
+    /// @dev Verifies that the contract's normal functions are not affected by fallback/receive restrictions
+    function test_ValidFunctionCalls_05_StillWork() public {
+        // Setup - prepare a valid function call (startMinting)
+        uint256 startMintingFee = artProject.START_MINTING_FEE();
+        vm.deal(randomUser, startMintingFee);
+
+        // Action - call a valid function
+        vm.prank(randomUser);
+        artProject.startMinting{value: startMintingFee}();
+
+        // Verify the function worked as expected
+        assertEq(
+            artProject.currentMinter(),
+            randomUser,
+            "Valid function call should work despite fallback/receive restrictions"
+        );
+    }
+}

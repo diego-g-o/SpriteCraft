@@ -1,0 +1,263 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "forge-std/Test.sol";
+import "./block_00_setup.t.sol";
+
+/// @title ArtProject01 isArtUnique Function Tests
+/// @author Claude
+/// @notice Unit testing for the isArtUnique function of the ArtProject01 contract
+/// @dev Contains comprehensive unit tests for all isArtUnique edge cases and requirements
+contract ArtProject01IsArtUniqueTest is ArtProjectTestSetup {
+    /**
+     * ================================================================================
+     *             test_IsArtUnique_ReturnsTrueForNewArt
+     * ================================================================================
+     */
+
+    /// @notice Tests that isArtUnique returns true for art that has not been minted
+    /// @dev Verifies the default state of mintedArts mapping for new art
+    function test_IsArtUnique_01_ReturnsTrueForNewArt() public {
+        // Create a new art piece
+        bytes32 artData = bytes32(
+            uint256(
+                0x00000000000000000000000000000000000000000000000000000000FFFF0000
+            )
+        );
+
+        // Verify the art is considered unique
+        bool isUnique = artProject.isArtUnique(artData);
+        assertTrue(isUnique, "New art should be considered unique");
+    }
+
+    /**
+     * ================================================================================
+     *             test_IsArtUnique_ReturnsFalseAfterMinting
+     * ================================================================================
+     */
+
+    /// @notice Tests that isArtUnique returns false after the art has been minted
+    /// @dev Verifies the state change in mintedArts mapping after minting
+    function test_IsArtUnique_02_ReturnsFalseAfterMinting() public {
+        // Setup
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Give user enough pixels
+        _giveUserPixels(randomUser, 100);
+
+        // Verify art is unique before minting
+        bool isUniqueBeforeMint = artProject.isArtUnique(artData);
+        assertTrue(isUniqueBeforeMint, "Art should be unique before minting");
+
+        // Mint the NFT
+        vm.startPrank(randomUser);
+        artProject.mintNFT{value: artProject.currentPrice()}(artData);
+        vm.stopPrank();
+
+        // Verify art is no longer unique after minting
+        bool isUniqueAfterMint = artProject.isArtUnique(artData);
+        assertFalse(
+            isUniqueAfterMint,
+            "Art should not be unique after minting"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_IsArtUnique_ReturnsTrueForSimilarArt
+     * ================================================================================
+     */
+
+    /// @notice Tests that isArtUnique returns true for art that differs by just one pixel
+    /// @dev Verifies that small variations in art data are considered unique
+    function test_IsArtUnique_03_ReturnsTrueForSimilarArt() public {
+        // Setup - create original art
+        bytes32 originalArt = bytes32(
+            uint256(
+                0x00000000000000000000000000000000000000000000000000000000FFFF0000
+            )
+        );
+
+        // Setup for minting
+        _setupForMinting(randomUser);
+        _giveUserPixels(randomUser, 100);
+
+        // Mint the original art
+        vm.startPrank(randomUser);
+        artProject.mintNFT{value: artProject.currentPrice()}(originalArt);
+        vm.stopPrank();
+
+        // Create a slightly different art (change one bit)
+        bytes32 similarArt = bytes32(
+            uint256(
+                0x00000000000000000000000000000000000000000000000000000000FFFE0000
+            )
+        );
+
+        // Verify the similar art is considered unique
+        bool isSimilarArtUnique = artProject.isArtUnique(similarArt);
+        assertTrue(
+            isSimilarArtUnique,
+            "Similar art with one pixel difference should be unique"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_IsArtUnique_ConsistencyAfterMultipleMints
+     * ================================================================================
+     */
+
+    /// @notice Tests that isArtUnique remains consistent after multiple mints
+    /// @dev Verifies that the mintedArts mapping correctly tracks multiple minted arts
+    function test_IsArtUnique_04_ConsistencyAfterMultipleMints() public {
+        // Create multiple art pieces
+        bytes32[] memory artPieces = new bytes32[](3);
+        artPieces[0] = bytes32(
+            uint256(
+                0x0000000000000000000000000000000000000000000000000000000000000001
+            )
+        );
+        artPieces[1] = bytes32(
+            uint256(
+                0x0000000000000000000000000000000000000000000000000000000000000002
+            )
+        );
+        artPieces[2] = bytes32(
+            uint256(
+                0x0000000000000000000000000000000000000000000000000000000000000003
+            )
+        );
+
+        // Verify all art pieces are initially unique
+        for (uint i = 0; i < artPieces.length; i++) {
+            bool isUnique = artProject.isArtUnique(artPieces[i]);
+            assertTrue(isUnique, "All art pieces should initially be unique");
+        }
+
+        // Mint each art piece
+        for (uint i = 0; i < artPieces.length; i++) {
+            // Create a unique user for each mint
+            address user = address(uint160(0x1000 + i));
+            vm.deal(user, 10 ether);
+
+            // Give user pixels
+            _giveUserPixels(user, 100);
+
+            // Start minting
+            vm.startPrank(user);
+            artProject.startMinting{value: artProject.START_MINTING_FEE()}();
+
+            // Mint NFT
+            artProject.mintNFT{value: artProject.currentPrice()}(artPieces[i]);
+            vm.stopPrank();
+        }
+
+        // Verify all minted art pieces are no longer unique
+        for (uint i = 0; i < artPieces.length; i++) {
+            bool isUnique = artProject.isArtUnique(artPieces[i]);
+            assertFalse(isUnique, "Minted art pieces should not be unique");
+        }
+
+        // Create a new art piece that hasn't been minted
+        bytes32 newArt = bytes32(
+            uint256(
+                0x0000000000000000000000000000000000000000000000000000000000000004
+            )
+        );
+
+        // Verify the new art piece is still considered unique
+        bool isNewArtUnique = artProject.isArtUnique(newArt);
+        assertTrue(
+            isNewArtUnique,
+            "New art should still be unique after multiple mints"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_IsArtUnique_EdgeCases
+     * ================================================================================
+     */
+
+    /// @notice Tests isArtUnique with edge case art data
+    /// @dev Verifies function behavior with extreme values like all zeros, all ones, etc.
+    function test_IsArtUnique_05_EdgeCases() public {
+        // Test with all zeros (empty canvas)
+        bytes32 emptyCanvas = bytes32(0);
+        bool isEmptyCanvasUnique = artProject.isArtUnique(emptyCanvas);
+        assertTrue(isEmptyCanvasUnique, "Empty canvas should be unique");
+
+        // Test with all ones (fully filled canvas)
+        bytes32 fullCanvas = bytes32(uint256(type(uint256).max));
+        bool isFullCanvasUnique = artProject.isArtUnique(fullCanvas);
+        assertTrue(isFullCanvasUnique, "Full canvas should be unique");
+
+        // Mint the empty canvas
+        _setupForMinting(randomUser);
+        _giveUserPixels(randomUser, 256); // Need enough pixels for full canvas
+
+        vm.startPrank(randomUser);
+        artProject.mintNFT{value: artProject.currentPrice()}(emptyCanvas);
+        vm.stopPrank();
+
+        // Verify empty canvas is no longer unique
+        bool isEmptyCanvasUniqueAfterMint = artProject.isArtUnique(emptyCanvas);
+        assertFalse(
+            isEmptyCanvasUniqueAfterMint,
+            "Empty canvas should not be unique after minting"
+        );
+
+        // Full canvas should still be unique
+        bool isFullCanvasUniqueAfterMint = artProject.isArtUnique(fullCanvas);
+        assertTrue(
+            isFullCanvasUniqueAfterMint,
+            "Full canvas should still be unique"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_IsArtUnique_GasUsage
+     * ================================================================================
+     */
+
+    /// @notice Tests the gas usage of the isArtUnique function
+    /// @dev Measures gas consumption for both true and false return cases
+    function test_IsArtUnique_07_GasUsage() public {
+        // Create test art data
+        bytes32 artData = bytes32(
+            uint256(
+                0x00000000000000000000000000000000000000000000000000000000FFFF0000
+            )
+        );
+
+        // Measure gas for unique art (should return true)
+        uint256 gasStartUnique = gasleft();
+        bool isUnique = artProject.isArtUnique(artData);
+        uint256 gasUsedUnique = gasStartUnique - gasleft();
+
+        // Log gas usage for unique art
+        console.log("Gas used for isArtUnique (true case):", gasUsedUnique);
+
+        // Mint the art to make it non-unique
+        _setupForMinting(randomUser);
+        _giveUserPixels(randomUser, 100);
+
+        vm.startPrank(randomUser);
+        artProject.mintNFT{value: artProject.currentPrice()}(artData);
+        vm.stopPrank();
+
+        // Measure gas for non-unique art (should return false)
+        uint256 gasStartNonUnique = gasleft();
+        bool isNonUnique = artProject.isArtUnique(artData);
+        uint256 gasUsedNonUnique = gasStartNonUnique - gasleft();
+
+        // Log gas usage for non-unique art
+        console.log("Gas used for isArtUnique (false case):", gasUsedNonUnique);
+
+        // Verify function results
+        assertTrue(isUnique, "First call should return true");
+        assertFalse(isNonUnique, "Second call should return false");
+    }
+}

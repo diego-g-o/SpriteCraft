@@ -1,0 +1,304 @@
+
+
+
+ /**
+     * ================================================================================
+     *             startMinting() TESTING
+     * ================================================================================
+     */
+
+    function test_StartMinting_WithCorrectFee_IdleState() public {
+        // Setup
+        vm.deal(randomUser, 1 ether); // Give randomUser some ETH
+        vm.startPrank(randomUser);
+
+        // Initial state check
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "Initial state should be Idle"
+        );
+
+        // Action
+        artProject.startMinting{value: artProject.START_MINTING_FEE()}();
+
+        // Assertions
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "State should be Minting"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            randomUser,
+            "Current minter should be the caller"
+        );
+        assertEq(
+            artProject.mintingExpiry(),
+            block.timestamp + artProject.MINTING_WINDOW_DURATION(),
+            "Expiry should be set correctly"
+        );
+
+        vm.stopPrank();
+    }
+
+    function test_StartMinting_RevertWhen_WithZeroFee() public {
+        // Setup
+        vm.deal(randomUser, 1 ether);
+        vm.startPrank(randomUser);
+
+        // Expect revert with specific message
+        vm.expectRevert("Incorrect start fee. See source code");
+
+        // Action with zero fee
+        artProject.startMinting{value: 0}();
+
+        vm.stopPrank();
+    }
+
+    function test_StartMinting_RevertWhen_WithSmallerFee() public {
+        // Setup
+        uint256 smallerValue = artProject.START_MINTING_FEE() - 1;
+        vm.deal(randomUser, 1 ether);
+        vm.startPrank(randomUser);
+
+        // Expect revert with specific message
+        vm.expectRevert("Incorrect start fee. See source code");
+
+        // Action with smaller fee - MAKE SURE TO CALL THE FUNCTION
+        artProject.startMinting{value: smallerValue}();
+
+        vm.stopPrank();
+    }
+
+    function test_StartMinting_RevertWhen_WithLargerFee() public {
+        // Setup
+        uint256 largerValue = artProject.START_MINTING_FEE() + 1;
+        vm.deal(randomUser, 1 ether);
+        vm.startPrank(randomUser);
+
+        // Expect revert with specific message
+        vm.expectRevert("Incorrect start fee. See source code");
+
+        // Action with larger fee - MAKE SURE TO CALL THE FUNCTION
+        artProject.startMinting{value: largerValue}();
+
+        vm.stopPrank();
+    }
+
+    function test_StartMinting_RevertWhen_NonExpiredMintingState() public {
+        // Setup - first set the contract to Minting state
+        uint256 exactMintingValue = artProject.START_MINTING_FEE();
+        vm.deal(randomUser, 1 ether);
+        vm.startPrank(randomUser);
+
+        // Put contract in Minting state
+        artProject.startMinting{value: exactMintingValue}(); //CAPAZ EL ERROR ESTA ACA
+
+        // Verify we're in Minting state
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "State should be Minting"
+        );
+
+        // Switch to another user
+        vm.stopPrank();
+        vm.deal(testUser, 1 ether);
+        vm.startPrank(testUser);
+
+        // Expect revert with InvalidMintingState error
+        // The error format needs to match exactly what the contract produces
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ArtProject01.InvalidMintingState.selector,
+                ArtProject01.MintingState.Idle,
+                ArtProject01.MintingState.Minting
+            )
+        );
+
+        // Action - try to start minting while already in Minting state
+        artProject.startMinting{value: exactMintingValue}();
+
+        vm.stopPrank();
+    }
+
+    function test_StartMinting_WithCorrectFee_ExpiredMintingState() public {
+        // Setup - first set the contract to Minting state
+        uint256 exactMintingValue = artProject.START_MINTING_FEE();
+        vm.deal(randomUser, 1 ether);
+        vm.startPrank(randomUser);
+
+        // Put contract in Minting state
+        artProject.startMinting{value: exactMintingValue}();
+
+        // Verify we're in Minting state
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "State should be Minting"
+        );
+
+        // Fast forward time to expire the minting window
+        uint256 expiryTime = artProject.mintingExpiry();
+        vm.warp(expiryTime + 1);
+
+        // Switch to another user
+        vm.stopPrank();
+        vm.deal(testUser, 1 ether);
+        vm.startPrank(testUser);
+
+        // Action - start minting after previous session expired
+        artProject.startMinting{value: exactMintingValue}();
+
+        // Assertions
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "State should be Minting"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            testUser,
+            "Current minter should be the new caller"
+        );
+        assertEq(
+            artProject.mintingExpiry(),
+            block.timestamp + artProject.MINTING_WINDOW_DURATION(),
+            "Expiry should be set correctly"
+        );
+
+        vm.stopPrank();
+    }
+
+    // Helper function to set up a minting state
+    function _setupMintingState(
+        address minter
+    ) internal returns (uint256 expiryTime) {
+        vm.deal(minter, 1 ether);
+        vm.startPrank(minter);
+
+        artProject.startMinting{value: artProject.START_MINTING_FEE()}();
+        expiryTime = artProject.mintingExpiry();
+
+        vm.stopPrank();
+        return expiryTime;
+    }
+
+    function test_RevertWhen_StartMinting_ContractCaller() public {
+        // Setup
+        vm.prank(owner);
+        artProject.setTestMode(false);
+        uint256 exactMintingValue = artProject.START_MINTING_FEE();
+        vm.deal(address(this), 1 ether);
+
+        // Expect revert with NotEOA error
+        vm.expectRevert(ArtProject01.NotEOA.selector);
+
+        // Action
+        artProject.startMinting{value: exactMintingValue}();
+    }
+
+    function test_StartMinting_RevertWhen_MintingStopped() public {
+        // Setup
+        uint256 exactMintingValue = artProject.START_MINTING_FEE();
+        vm.startPrank(owner);
+        artProject.stopMinting();
+        vm.stopPrank();
+
+        vm.deal(randomUser, 1 ether);
+        vm.startPrank(randomUser);
+
+        // Expect revert with "Minting is stopped"
+        vm.expectRevert("Minting is stopped");
+
+        // Action
+        artProject.startMinting{value: exactMintingValue}();
+        vm.stopPrank();
+    }
+
+    function test_StartMinting_AtExactExpiryTime() public {
+        // Setup - first set the contract to Minting state
+        uint256 exactMintingValue = artProject.START_MINTING_FEE();
+        vm.deal(randomUser, 1 ether);
+        vm.startPrank(randomUser);
+
+        // Put contract in Minting state
+        artProject.startMinting{value: exactMintingValue}();
+
+        // Fast forward to exact expiry time
+        uint256 expiryTime = artProject.mintingExpiry();
+        vm.warp(expiryTime);
+
+        // Switch to another user
+        vm.stopPrank();
+        vm.deal(testUser, 1 ether);
+        vm.startPrank(testUser);
+
+        // Action - start minting at exact expiry time
+        artProject.startMinting{value: exactMintingValue}();
+
+        // Assertions
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "State should be Minting"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            testUser,
+            "Current minter should be the new caller"
+        );
+        vm.stopPrank();
+    }
+
+    function test_StartMinting_MultipleUsers_AfterExpiry() public {
+        // Setup - first set the contract to Minting state
+        uint256 exactMintingValue = artProject.START_MINTING_FEE();
+        vm.deal(randomUser, 1 ether);
+        vm.startPrank(randomUser);
+
+        // Put contract in Minting state
+        artProject.startMinting{value: exactMintingValue}();
+
+        // Fast forward time to expire the minting window
+        uint256 expiryTime = artProject.mintingExpiry();
+        vm.warp(expiryTime + 1);
+
+        // First user starts minting
+        vm.stopPrank();
+        vm.deal(testUser, 1 ether);
+        vm.startPrank(testUser);
+        artProject.startMinting{value: exactMintingValue}();
+        vm.stopPrank();
+
+        // Assertions
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "State should be Minting"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            testUser,
+            "Current minter should be the new caller"
+        );
+
+        // Second user tries to start minting
+        vm.deal(randomUser, 1 ether);
+        vm.startPrank(randomUser);
+
+        // Expect revert with InvalidMintingState error
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ArtProject01.InvalidMintingState.selector,
+                ArtProject01.MintingState.Idle,
+                ArtProject01.MintingState.Minting
+            )
+        );
+
+        // Action
+        artProject.startMinting{value: exactMintingValue}();
+        vm.stopPrank();
+    }
+}

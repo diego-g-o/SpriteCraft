@@ -1,12 +1,14 @@
 "use client";
 
 // @refresh reset
+import { useContext, useEffect } from "react";
 import { Balance } from "../Balance";
 import { AddressInfoDropdown } from "./AddressInfoDropdown";
 import { AddressQRCodeModal } from "./AddressQRCodeModal";
 import { WrongNetworkDropdown } from "./WrongNetworkDropdown";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Address } from "viem";
+import { AddressContext } from "~~/components/Header";
 import { useNetworkColor } from "~~/hooks/scaffold-eth";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth/useTargetNetwork";
 import { getBlockExplorerAddressLink } from "~~/utils/scaffold-eth";
@@ -17,6 +19,7 @@ import { getBlockExplorerAddressLink } from "~~/utils/scaffold-eth";
 export const RainbowKitCustomConnectButton = () => {
   const networkColor = useNetworkColor();
   const { targetNetwork } = useTargetNetwork();
+  const { setAddress, setIsWalletConnected } = useContext(AddressContext);
 
   return (
     <ConnectButton.Custom>
@@ -25,6 +28,16 @@ export const RainbowKitCustomConnectButton = () => {
         const blockExplorerAddressLink = account
           ? getBlockExplorerAddressLink(targetNetwork, account.address)
           : undefined;
+
+        // Update the address context when the wallet connection changes
+        useEffect(() => {
+          if (connected && account) {
+            setAddress(account.address as string);
+            setIsWalletConnected(true);
+          } else {
+            setIsWalletConnected(false);
+          }
+        }, [connected, account]);
 
         return (
           <>

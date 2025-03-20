@@ -1,0 +1,276 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "forge-std/Test.sol";
+import "./block_00_setup.t.sol";
+
+/// @title ArtProject01 CountBlackPixels Function Tests
+/// @author Claude
+/// @notice Unit testing for the countBlackPixels function of the ArtProject01 contract
+/// @dev Contains comprehensive unit tests for the countBlackPixels function with various input patterns
+contract ArtProject01CountBlackPixelsTest is ArtProjectTestSetup {
+    /**
+     * ================================================================================
+     *             test_CountBlackPixels_EmptyGrid
+     * ================================================================================
+     */
+
+    /// @notice Tests countBlackPixels with an empty grid (all white pixels)
+    /// @dev Verifies that the function returns 0 for a bytes32 with all bits set to 0
+    function test_CountBlackPixels_01_EmptyGrid() public {
+        // Create art data with no black pixels (all 0s)
+        bytes32 emptyGrid = bytes32(0);
+
+        // Verify the count
+        uint256 pixelCount = artProject.countBlackPixels(emptyGrid);
+        assertEq(pixelCount, 0, "Should count 0 black pixels for empty grid");
+    }
+
+    /**
+     * ================================================================================
+     *             test_CountBlackPixels_FullGrid
+     * ================================================================================
+     */
+
+    /// @notice Tests countBlackPixels with a full grid (all black pixels)
+    /// @dev Verifies that the function returns 256 for a bytes32 with all bits set to 1
+    function test_CountBlackPixels_02_FullGrid() public {
+        // Create art data with all black pixels (all 1s)
+        bytes32 fullGrid = bytes32(uint256(type(uint256).max));
+
+        // Verify the count
+        uint256 pixelCount = artProject.countBlackPixels(fullGrid);
+        assertEq(
+            pixelCount,
+            256,
+            "Should count 256 black pixels for full grid"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_CountBlackPixels_SinglePixel
+     * ================================================================================
+     */
+
+    /// @notice Tests countBlackPixels with a single black pixel
+    /// @dev Verifies that the function returns 1 for a bytes32 with only one bit set to 1
+    function test_CountBlackPixels_03_SinglePixel() public {
+        // Create art data with a single black pixel (only one bit set)
+        bytes32 singlePixel = bytes32(uint256(1));
+
+        // Verify the count
+        uint256 pixelCount = artProject.countBlackPixels(singlePixel);
+        assertEq(
+            pixelCount,
+            1,
+            "Should count 1 black pixel for single pixel grid"
+        );
+
+        // Test with a different position
+        bytes32 singlePixelDifferentPos = bytes32(uint256(1 << 128));
+        uint256 pixelCount2 = artProject.countBlackPixels(
+            singlePixelDifferentPos
+        );
+        assertEq(
+            pixelCount2,
+            1,
+            "Should count 1 black pixel regardless of position"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_CountBlackPixels_AllButOne
+     * ================================================================================
+     */
+
+    /// @notice Tests countBlackPixels with all pixels black except one
+    /// @dev Verifies that the function returns 255 for a bytes32 with all bits set to 1 except one
+    function test_CountBlackPixels_04_AllButOne() public {
+        // Create art data with all black pixels except one
+        bytes32 allButOne = bytes32(uint256(type(uint256).max - 1));
+
+        // Verify the count
+        uint256 pixelCount = artProject.countBlackPixels(allButOne);
+        assertEq(
+            pixelCount,
+            255,
+            "Should count 255 black pixels for all-but-one grid"
+        );
+
+        // Test with a different position
+        bytes32 allButOneDifferentPos = bytes32(
+            uint256(type(uint256).max - (1 << 128))
+        );
+        uint256 pixelCount2 = artProject.countBlackPixels(
+            allButOneDifferentPos
+        );
+        assertEq(
+            pixelCount2,
+            255,
+            "Should count 255 black pixels regardless of which pixel is white"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_CountBlackPixels_HalfGrid
+     * ================================================================================
+     */
+
+    /// @notice Tests countBlackPixels with exactly half of the pixels black
+    /// @dev Verifies that the function returns 128 for a bytes32 with half of its bits set to 1
+    function test_CountBlackPixels_05_HalfGrid() public {
+        // Create art data with the lower 128 bits set to 1 (half grid)
+        bytes32 halfGrid = bytes32(uint256((1 << 128) - 1));
+
+        // Verify the count
+        uint256 pixelCount = artProject.countBlackPixels(halfGrid);
+        assertEq(
+            pixelCount,
+            128,
+            "Should count 128 black pixels for half grid"
+        );
+
+        // Test with a different pattern (alternating bits)
+        bytes32 alternatingBits = bytes32(
+            0x5555555555555555555555555555555555555555555555555555555555555555
+        );
+        uint256 pixelCount2 = artProject.countBlackPixels(alternatingBits);
+        assertEq(
+            pixelCount2,
+            128,
+            "Should count 128 black pixels for alternating pattern"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_CountBlackPixels_RandomPatterns
+     * ================================================================================
+     */
+
+    /// @notice Tests countBlackPixels with various random patterns
+    /// @dev Verifies that the function correctly counts black pixels in different patterns
+    function test_CountBlackPixels_06_RandomPatterns() public {
+        // Pattern 1: 16 bits set in a row
+        bytes32 pattern1 = bytes32(uint256(0xFFFF));
+        uint256 pixelCount1 = artProject.countBlackPixels(pattern1);
+        assertEq(pixelCount1, 16, "Should count 16 black pixels for pattern 1");
+
+        // Pattern 2: 32 bits set in a row
+        bytes32 pattern2 = bytes32(uint256(0xFFFFFFFF));
+        uint256 pixelCount2 = artProject.countBlackPixels(pattern2);
+        assertEq(pixelCount2, 32, "Should count 32 black pixels for pattern 2");
+
+        // Pattern 3: Scattered bits (known count of 24)
+        bytes32 pattern3 = bytes32(
+            uint256(
+                0x0F0F0F0F00000000000000000000000000000000000000000000000000000000
+            )
+        );
+        uint256 pixelCount3 = artProject.countBlackPixels(pattern3);
+        assertEq(pixelCount3, 16, "Should count 16 black pixels for pattern 3");
+
+        // Pattern 4: Complex pattern with 42 bits set
+        bytes32 pattern4 = bytes32(uint256(0x123456789ABCDEF0123456789ABCDEF0));
+        uint256 pixelCount4 = artProject.countBlackPixels(pattern4);
+        assertEq(pixelCount4, 42, "Should count 42 black pixels for pattern 4");
+    }
+
+    /**
+     * ================================================================================
+     *             test_CountBlackPixels_SpecificArtPatterns
+     * ================================================================================
+     */
+
+    /// @notice Tests countBlackPixels with patterns that might represent actual art
+    /// @dev Verifies that the function correctly counts black pixels in art-like patterns
+    function test_CountBlackPixels_07_SpecificArtPatterns() public {
+        // Simple square pattern (16 pixels in a 4x4 square)
+        bytes32 squarePattern = bytes32(
+            uint256(
+                0x000000000000000000000000000000000000000000000000000000000000F0F0
+            )
+        );
+        uint256 squarePixelCount = artProject.countBlackPixels(squarePattern);
+        assertEq(
+            squarePixelCount,
+            8,
+            "Should count 8 black pixels for square pattern"
+        );
+
+        // Border pattern (frame around the edge)
+        bytes32 borderPattern = bytes32(
+            uint256(
+                0xFF818181818181FF00000000000000000000000000000000000000000000000
+            )
+        );
+        uint256 borderPixelCount = artProject.countBlackPixels(borderPattern);
+        assertEq(
+            borderPixelCount,
+            16,
+            "Should count 16 black pixels for border pattern"
+        );
+
+        // Diagonal pattern
+        bytes32 diagonalPattern = bytes32(
+            uint256(
+                0x8040201008040201000000000000000000000000000000000000000000000000
+            )
+        );
+        uint256 diagonalPixelCount = artProject.countBlackPixels(
+            diagonalPattern
+        );
+        assertEq(
+            diagonalPixelCount,
+            8,
+            "Should count 8 black pixels for diagonal pattern"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_CountBlackPixels_EdgeCases
+     * ================================================================================
+     */
+
+    /// @notice Tests countBlackPixels with edge case patterns
+    /// @dev Verifies that the function handles edge cases correctly
+    function test_CountBlackPixels_08_EdgeCases() public {
+        // Edge case 1: Only the most significant bit set
+        bytes32 msbSet = bytes32(uint256(1 << 255));
+        uint256 msbCount = artProject.countBlackPixels(msbSet);
+        assertEq(msbCount, 1, "Should count 1 black pixel for MSB set");
+
+        // Edge case 2: Only the least significant bit set
+        bytes32 lsbSet = bytes32(uint256(1));
+        uint256 lsbCount = artProject.countBlackPixels(lsbSet);
+        assertEq(lsbCount, 1, "Should count 1 black pixel for LSB set");
+
+        // Edge case 3: Alternating bits starting with 1
+        bytes32 alternating1 = bytes32(
+            0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        );
+        uint256 alternating1Count = artProject.countBlackPixels(alternating1);
+        assertEq(
+            alternating1Count,
+            128,
+            "Should count 128 black pixels for alternating pattern starting with 1"
+        );
+
+        // Edge case 4: Bits set at byte boundaries
+        bytes32 byteBoundaries = bytes32(
+            0x0100010001000100010001000100010001000100010001000100010001000100
+        );
+        uint256 byteBoundariesCount = artProject.countBlackPixels(
+            byteBoundaries
+        );
+        assertEq(
+            byteBoundariesCount,
+            32,
+            "Should count 32 black pixels for byte boundaries pattern"
+        );
+    }
+}

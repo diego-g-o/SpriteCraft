@@ -1,0 +1,296 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "forge-std/Test.sol";
+import "./block_00_setup.t.sol";
+
+/// @title ArtProject01 Reset State Functionality Tests
+/// @author Claude
+/// @notice Unit testing for the resetState function of the ArtProject01 contract
+/// @dev Contains comprehensive unit tests for all resetState edge cases and requirements
+contract ArtProject01ResetStateTest is ArtProjectTestSetup {
+    /**
+     * ================================================================================
+     *             test_ResetState_ExpiredMintingSession
+     * ================================================================================
+     */
+
+    /// @notice Tests that resetState correctly resets state when minting window has expired
+    /// @dev Verifies that the function resets all transient state variables and emits the correct event
+    function test_ResetState_01_ExpiredMintingSession() public {
+        // Setup - start minting with randomUser
+        _setupForMinting(randomUser);
+
+        // Verify initial minting state
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "Initial state should be Minting"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            randomUser,
+            "Current minter should be set"
+        );
+        assertTrue(
+            artProject.mintingExpiry() > 0,
+            "Minting expiry should be set"
+        );
+
+        // Fast forward time to expire the minting window
+        uint256 expiryTime = artProject.mintingExpiry();
+        vm.warp(expiryTime + 1);
+
+        // Expect MintingExpired event with the correct minter address
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.MintingExpired(randomUser);
+
+        // Call resetState
+        artProject.resetState();
+
+        // Verify state has been reset
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should reset to Idle"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            address(0),
+            "Current minter should be reset"
+        );
+        assertEq(
+            artProject.mintingExpiry(),
+            0,
+            "Minting expiry should be reset"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_ResetState_RevertWhen_NotExpired
+     * ================================================================================
+     */
+
+    /// @notice Tests that resetState reverts when the minting window has not expired
+    /// @dev Verifies that the function correctly prevents state reset when not expired
+    function test_ResetState_02_RevertWhen_NotExpired() public {
+        // Setup - start minting with randomUser
+        _setupForMinting(randomUser);
+
+        // Verify initial minting state
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "Initial state should be Minting"
+        );
+
+        // Ensure we're still within the minting window
+        uint256 expiryTime = artProject.mintingExpiry();
+        vm.warp(expiryTime - 1);
+
+        // Expect revert with InvalidResetState error
+        vm.expectRevert(ArtProject01.InvalidResetState.selector);
+
+        // Call resetState
+        artProject.resetState();
+
+        // Verify state has not changed
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "State should still be Minting"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            randomUser,
+            "Current minter should not be reset"
+        );
+        assertEq(
+            artProject.mintingExpiry(),
+            expiryTime,
+            "Minting expiry should not be reset"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_ResetState_RevertWhen_IdleState
+     * ================================================================================
+     */
+
+    /// @notice Tests that resetState reverts when the contract is already in Idle state
+    /// @dev Verifies that the function correctly prevents unnecessary state resets
+    function test_ResetState_03_RevertWhen_IdleState() public {
+        // Verify we're in Idle state
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "Initial state should be Idle"
+        );
+
+        // Expect revert with InvalidResetState error
+        vm.expectRevert(ArtProject01.InvalidResetState.selector);
+
+        // Call resetState
+        artProject.resetState();
+
+        // Verify state has not changed
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should still be Idle"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_ResetState_CalledByAnyone
+     * ================================================================================
+     */
+
+    /// @notice Tests that resetState can be called by any address
+    /// @dev Verifies that the function is accessible to all users
+    function test_ResetState_04_CalledByAnyone() public {
+        // Setup - start minting with randomUser
+        _setupForMinting(randomUser);
+
+        // Fast forward time to expire the minting window
+        uint256 expiryTime = artProject.mintingExpiry();
+        vm.warp(expiryTime + 1);
+
+        // Call resetState from a different user
+        vm.prank(testUser);
+        artProject.resetState();
+
+        // Verify state has been reset
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should reset to Idle"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_ResetState_AfterMultipleExpiries
+     * ================================================================================
+     */
+
+    /// @notice Tests that resetState works correctly after multiple minting sessions expire
+    /// @dev Verifies that the function handles consecutive minting sessions correctly
+    function test_ResetState_05_AfterMultipleExpiries() public {
+        // First minting session
+        _setupForMinting(randomUser);
+
+        // Fast forward time to expire the first minting window
+        uint256 expiryTime1 = artProject.mintingExpiry();
+        vm.warp(expiryTime1 + 1);
+
+        // Reset state after first expiry
+        artProject.resetState();
+
+        // Verify state has been reset
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should reset to Idle after first expiry"
+        );
+
+        // Second minting session
+        _setupForMinting(testUser);
+
+        // Fast forward time to expire the second minting window
+        uint256 expiryTime2 = artProject.mintingExpiry();
+        vm.warp(expiryTime2 + 1);
+
+        // Expect MintingExpired event with the correct minter address
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.MintingExpired(testUser);
+
+        // Reset state after second expiry
+        artProject.resetState();
+
+        // Verify state has been reset again
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should reset to Idle after second expiry"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            address(0),
+            "Current minter should be reset after second expiry"
+        );
+        assertEq(
+            artProject.mintingExpiry(),
+            0,
+            "Minting expiry should be reset after second expiry"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_ResetState_ExactlyAtExpiry
+     * ================================================================================
+     */
+
+    /// @notice Tests that resetState works correctly exactly at the expiry time
+    /// @dev Verifies the boundary condition of the expiry check
+    function test_ResetState_06_ExactlyAtExpiry() public {
+        // Setup - start minting with randomUser
+        _setupForMinting(randomUser);
+
+        // Fast forward time to exactly the expiry time
+        uint256 expiryTime = artProject.mintingExpiry();
+        vm.warp(expiryTime);
+
+        // Expect MintingExpired event with the correct minter address
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.MintingExpired(randomUser);
+
+        // Call resetState
+        artProject.resetState();
+
+        // Verify state has been reset
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should reset to Idle"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_ResetState_AfterSuccessfulMint
+     * ================================================================================
+     */
+
+    /// @notice Tests that resetState reverts after a successful mint
+    /// @dev Verifies that the function correctly handles the case where minting has already reset the state
+    function test_ResetState_07_AfterSuccessfulMint() public {
+        // Setup - start minting with randomUser
+        bytes32 artData = _setupForMinting(randomUser);
+
+        // Give user enough pixels
+        _giveUserPixels(randomUser, 100);
+
+        // Mint NFT
+        vm.startPrank(randomUser);
+        artProject.mintNFT{value: artProject.currentPrice()}(artData);
+        vm.stopPrank();
+
+        // Verify state has been reset by the mint
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Idle),
+            "State should be Idle after mint"
+        );
+
+        // Expect revert with InvalidResetState error
+        vm.expectRevert(ArtProject01.InvalidResetState.selector);
+
+        // Call resetState
+        artProject.resetState();
+    }
+}

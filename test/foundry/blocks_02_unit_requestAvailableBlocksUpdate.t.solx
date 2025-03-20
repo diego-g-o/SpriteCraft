@@ -1,0 +1,225 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "forge-std/Test.sol";
+import "./block_00_setup.t.sol";
+
+/// @title ArtProject01 RequestAvailableBlockUpdate Functionality Tests
+/// @author Diego
+/// @notice Unit testing for the requestAvailableBlockUpdate function of the ArtProject01 contract
+/// @dev Contains comprehensive unit tests for all requestAvailableBlockUpdate edge cases and requirements
+contract ArtProject01RequestAvailableBlockUpdateTest is ArtProjectTestSetup {
+    /**
+     * ================================================================================
+     *             test_RequestAvailableBlockUpdate_EmitsEvent
+     * ================================================================================
+     */
+
+    /// @notice Tests that requestAvailableBlockUpdate emits the correct event
+    /// @dev Verifies that the AvailableBlockUpdateRequested event is emitted with the caller's address
+    function test_RequestAvailableBlockUpdate_01_EmitsEvent() public {
+        // Setup - prepare to check for event emission
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.AvailableBlockUpdateRequested(randomUser);
+
+        // Action - call requestAvailableBlockUpdate as randomUser
+        vm.prank(randomUser);
+        artProject.requestAvailableBlockUpdate();
+    }
+
+    /**
+     * ================================================================================
+     *             test_RequestAvailableBlockUpdate_RevertWhen_CalledByContract
+     * ================================================================================
+     */
+
+    /// @notice Tests that requestAvailableBlockUpdate reverts when called by a contract
+    /// @dev Verifies the EOA check in the requestAvailableBlockUpdate function by calling it from the test contract
+    function test_RequestAvailableBlockUpdate_02_RevertWhen_CalledByContract()
+        public
+    {
+        // Disable test mode to enforce EOA check
+        vm.prank(owner);
+        artProject.setTestMode(false);
+
+        // Expect revert with NotEOA error
+        vm.expectRevert(ArtProject01.NotEOA.selector);
+
+        // Action - call from contract (this test contract)
+        artProject.requestAvailableBlockUpdate();
+    }
+
+    /**
+     * ================================================================================
+     *             test_RequestAvailableBlockUpdate_MultipleUsers
+     * ================================================================================
+     */
+
+    /// @notice Tests that requestAvailableBlockUpdate works correctly for multiple users
+    /// @dev Verifies that the function emits the correct event for different callers
+    function test_RequestAvailableBlockUpdate_03_MultipleUsers() public {
+        // Test with first user
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.AvailableBlockUpdateRequested(randomUser);
+
+        vm.prank(randomUser);
+        artProject.requestAvailableBlockUpdate();
+
+        // Test with second user
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.AvailableBlockUpdateRequested(testUser);
+
+        vm.prank(testUser);
+        artProject.requestAvailableBlockUpdate();
+
+        // Test with owner
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.AvailableBlockUpdateRequested(owner);
+
+        vm.prank(owner);
+        artProject.requestAvailableBlockUpdate();
+    }
+
+    /**
+     * ================================================================================
+     *             test_RequestAvailableBlockUpdate_NoStateChanges
+     * ================================================================================
+     */
+
+    /// @notice Tests that requestAvailableBlockUpdate doesn't modify any state variables
+    /// @dev Verifies that the function only emits an event without changing contract state
+    function test_RequestAvailableBlockUpdate_04_NoStateChanges() public {
+        // Setup - record initial state
+        uint256 initialAvailablePixels = artProject.availablePixels(randomUser);
+        uint256 initialSpentPixels = artProject.spentPixels(randomUser);
+        uint256 initialTokenCounter = artProject.tokenCounter();
+        ArtProject01.MintingState initialMintingState = artProject
+            .mintingState();
+        address initialCurrentMinter = artProject.currentMinter();
+        uint256 initialMintingExpiry = artProject.mintingExpiry();
+
+        // Action - call requestAvailableBlockUpdate
+        vm.prank(randomUser);
+        artProject.requestAvailableBlockUpdate();
+
+        // Verify no state changes
+        assertEq(
+            artProject.availablePixels(randomUser),
+            initialAvailablePixels,
+            "Available pixels should not change"
+        );
+        assertEq(
+            artProject.spentPixels(randomUser),
+            initialSpentPixels,
+            "Spent pixels should not change"
+        );
+        assertEq(
+            artProject.tokenCounter(),
+            initialTokenCounter,
+            "Token counter should not change"
+        );
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(initialMintingState),
+            "Minting state should not change"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            initialCurrentMinter,
+            "Current minter should not change"
+        );
+        assertEq(
+            artProject.mintingExpiry(),
+            initialMintingExpiry,
+            "Minting expiry should not change"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_RequestAvailableBlockUpdate_WorksWhenMintingStopped
+     * ================================================================================
+     */
+
+    /// @notice Tests that requestAvailableBlockUpdate works even when minting is stopped
+    /// @dev Verifies that the function is not affected by the mintingStopped flag
+    function test_RequestAvailableBlockUpdate_05_WorksWhenMintingStopped()
+        public
+    {
+        // Stop minting
+        vm.prank(owner);
+        artProject.stopMinting();
+
+        // Verify minting is stopped
+        assertTrue(artProject.mintingStopped(), "Minting should be stopped");
+
+        // Expect event to be emitted despite minting being stopped
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.AvailableBlockUpdateRequested(randomUser);
+
+        // Action - call requestAvailableBlockUpdate
+        vm.prank(randomUser);
+        artProject.requestAvailableBlockUpdate();
+    }
+
+    /**
+     * ================================================================================
+     *             test_RequestAvailableBlockUpdate_WorksDuringMinting
+     * ================================================================================
+     */
+
+    /// @notice Tests that requestAvailableBlockUpdate works during active minting
+    /// @dev Verifies that the function works correctly when the contract is in Minting state
+    function test_RequestAvailableBlockUpdate_06_WorksDuringMinting() public {
+        // Setup - start minting with testUser
+        vm.startPrank(testUser);
+        vm.deal(testUser, 1 ether);
+        artProject.startMinting{value: artProject.START_MINTING_FEE()}();
+        vm.stopPrank();
+
+        // Verify we're in Minting state
+        assertEq(
+            uint(artProject.mintingState()),
+            uint(ArtProject01.MintingState.Minting),
+            "State should be Minting"
+        );
+        assertEq(
+            artProject.currentMinter(),
+            testUser,
+            "Current minter should be testUser"
+        );
+
+        // Expect event to be emitted by a different user during active minting
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.AvailableBlockUpdateRequested(randomUser);
+
+        // Action - call requestAvailableBlockUpdate with a different user
+        vm.prank(randomUser);
+        artProject.requestAvailableBlockUpdate();
+    }
+
+    /**
+     * ================================================================================
+     *             test_RequestAvailableBlockUpdate_WorksWithZeroPixels
+     * ================================================================================
+     */
+
+    /// @notice Tests that requestAvailableBlockUpdate works for users with zero pixels
+    /// @dev Verifies that the function works correctly regardless of user's pixel balance
+    function test_RequestAvailableBlockUpdate_07_WorksWithZeroPixels() public {
+        // Verify user has zero pixels
+        assertEq(
+            artProject.availablePixels(randomUser),
+            0,
+            "User should have zero available pixels initially"
+        );
+
+        // Expect event to be emitted despite zero pixels
+        vm.expectEmit(true, false, false, false);
+        emit ArtProject01.AvailableBlockUpdateRequested(randomUser);
+
+        // Action - call requestAvailableBlockUpdate
+        vm.prank(randomUser);
+        artProject.requestAvailableBlockUpdate();
+    }
+}

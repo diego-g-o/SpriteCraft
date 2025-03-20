@@ -1,0 +1,364 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "forge-std/Test.sol";
+import "./block_00_setup.t.sol";
+
+/// @title ArtProject01 Current Price Functionality Tests
+/// @author Claude
+/// @notice Unit testing for the currentPrice function of the ArtProject01 contract
+/// @dev Contains comprehensive unit tests for all currentPrice edge cases and requirements
+contract ArtProject01CurrentPriceTest is ArtProjectTestSetup {
+    // Snapshot ID for state management
+    uint256 private snapshotId;
+
+    // Setup function to initialize the test state
+    function setUp() public override {
+        super.setUp();
+        snapshotId = vm.snapshotState();
+    }
+
+    /**
+     * ================================================================================
+     *             test_CurrentPrice_AtDeployment
+     * ================================================================================
+     */
+
+    /// @notice Tests the currentPrice function at deployment time
+    /// @dev Verifies that the price is BASE_PRICE when no tokens have been minted
+    function test_CurrentPrice_01_AtDeployment() public {
+        // Set time to deployment time
+        vm.warp(deploymentTime);
+
+        // Get the current price
+        uint256 price = artProject.currentPrice();
+
+        // Verify price equals BASE_PRICE
+        assertEq(
+            price,
+            artProject.BASE_PRICE(),
+            "Price should be BASE_PRICE at deployment"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_CurrentPrice_BelowIdealSupply
+     * ================================================================================
+     */
+
+    /// @notice Tests the currentPrice function when actual supply is below ideal supply
+    /// @dev Verifies that the price remains at BASE_PRICE when fewer tokens are minted than expected
+    function test_CurrentPrice_02_BelowIdealSupply() public {
+        // Fast forward time to create an ideal supply greater than 0
+        // 24 hours = 1 day = 24 tokens (TOKENS_PER_DAY)
+        vm.warp(deploymentTime + 24 hours);
+
+        // Calculate expected ideal supply: 24 tokens after 1 day
+        uint256 expectedIdealSupply = 24;
+
+        // Mint fewer tokens than the ideal supply (e.g., 10)
+        _mintMultipleNFTs(10);
+
+        // Verify token counter is less than ideal supply
+        assertLt(
+            artProject.tokenCounter(),
+            expectedIdealSupply,
+            "Token counter should be less than ideal supply"
+        );
+
+        // Get the current price
+        uint256 price = artProject.currentPrice();
+
+        // Verify price equals BASE_PRICE
+        assertEq(
+            price,
+            artProject.BASE_PRICE(),
+            "Price should be BASE_PRICE when below ideal supply"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_CurrentPrice_AtIdealSupply
+     * ================================================================================
+     */
+
+    /// @notice Tests the currentPrice function when actual supply equals ideal supply
+    /// @dev Verifies that the price is BASE_PRICE when tokens minted match the expected rate
+    function test_CurrentPrice_03_AtIdealSupply() public {
+        // Fast forward time to create an ideal supply of exactly 24 tokens
+        vm.warp(deploymentTime + 24 hours);
+
+        // Calculate expected ideal supply: 24 tokens after 1 day
+        uint256 expectedIdealSupply = 24;
+
+        // Mint exactly the ideal number of tokens
+        _mintMultipleNFTs(24);
+
+        // Verify token counter equals ideal supply
+        assertEq(
+            artProject.tokenCounter(),
+            expectedIdealSupply,
+            "Token counter should equal ideal supply"
+        );
+
+        // Get the current price
+        uint256 price = artProject.currentPrice();
+
+        // Verify price equals BASE_PRICE
+        assertEq(
+            price,
+            artProject.BASE_PRICE(),
+            "Price should be BASE_PRICE when at ideal supply"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_CurrentPrice_AboveIdealSupply
+     * ================================================================================
+     */
+
+    /// @notice Tests the currentPrice function when actual supply exceeds ideal supply
+    /// @dev Verifies that the price increases by PRICE_INCREMENT for each token above ideal supply
+    function test_CurrentPrice_04_AboveIdealSupply() public {
+        // Fast forward time to create an ideal supply of exactly 24 tokens
+        vm.warp(deploymentTime + 24 hours);
+
+        // Calculate expected ideal supply: 24 tokens after 1 day
+        uint256 expectedIdealSupply = 24;
+
+        // Mint more than the ideal number of tokens (e.g., 30)
+        _mintMultipleNFTs(30);
+
+        // Calculate excess tokens
+        uint256 excessTokens = 30 - expectedIdealSupply; // 6 excess tokens
+
+        // Calculate expected price: BASE_PRICE + (excessTokens * PRICE_INCREMENT)
+        uint256 expectedPrice = artProject.BASE_PRICE() +
+            (excessTokens * artProject.PRICE_INCREMENT());
+
+        // Get the current price
+        uint256 price = artProject.currentPrice();
+
+        // Verify price equals expected price
+        assertEq(
+            price,
+            expectedPrice,
+            "Price should increase for tokens above ideal supply"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             test_CurrentPrice_MaxSupplyReached
+     * ================================================================================
+     */
+
+    /// @notice Tests the currentPrice function when max supply is reached
+    /// @dev Verifies that the price returns max uint256 when token counter equals MAX_SUPPLY
+    function test_CurrentPrice_05_MaxSupplyReached() public {
+        // Get the max supply
+        uint256 maxSupply = artProject.MAX_SUPPLY();
+
+        // Manipulate storage to set tokenCounter to MAX_SUPPLY
+        uint256 tokenCounterSlot = 16; // Known slot from previous tests
+        vm.store(
+            address(artProject),
+            bytes32(tokenCounterSlot),
+            bytes32(maxSupply)
+        );
+
+        // Verify tokenCounter equals MAX_SUPPLY
+        assertEq(
+            artProject.tokenCounter(),
+            maxSupply,
+            "Token counter should equal MAX_SUPPLY"
+        );
+
+        // Get the current price
+        uint256 price = artProject.currentPrice();
+
+        // Verify price equals max uint256
+        assertEq(
+            price,
+            type(uint256).max,
+            "Price should be max uint256 when max supply reached"
+        );
+    }
+
+    // REVISAR ESTE TEST
+
+    /**
+     * ================================================================================
+     *             test_CurrentPrice_VariousTimePeriods
+     * ================================================================================
+     */
+
+    /*
+    /// @notice Tests the currentPrice function with various time periods since deployment
+    /// @dev Verifies that the ideal supply calculation works correctly for different time periods
+    function test_CurrentPrice_06_VariousTimePeriods() public {
+        // Test case 1: 12 hours (0.5 days) - ideal supply should be 12 tokens
+        vm.warp(deploymentTime + 12 hours);
+        _mintMultipleNFTs(12); // Mint exactly the ideal supply
+        assertEq(
+            artProject.currentPrice(),
+            artProject.BASE_PRICE(),
+            "Price should be BASE_PRICE at 12 hours"
+        );
+
+        // Reset contract state
+        vm.revertToState(snapshotId);
+        snapshotId = vm.snapshotState();
+
+        // Test case 2: 36 hours (1.5 days) - ideal supply should be 36 tokens
+        vm.warp(deploymentTime + 36 hours);
+        _mintMultipleNFTs(40); // Mint more than ideal supply
+        uint256 excessTokens = 40 - 36; // 4 excess tokens
+        uint256 expectedPrice = artProject.BASE_PRICE() +
+            (excessTokens * artProject.PRICE_INCREMENT());
+        assertEq(
+            artProject.currentPrice(),
+            expectedPrice,
+            "Price calculation incorrect at 36 hours"
+        );
+
+        // Reset contract state
+        vm.revertToState(snapshotId);
+        snapshotId = vm.snapshotState();
+
+        // Test case 3: 7 days - ideal supply should be 168 tokens
+        vm.warp(deploymentTime + 7 days);
+        _mintMultipleNFTs(160); // Mint less than ideal supply
+        assertEq(
+            artProject.currentPrice(),
+            artProject.BASE_PRICE(),
+            "Price should be BASE_PRICE at 7 days with fewer tokens"
+        );
+    }
+*/
+    /**
+     * ================================================================================
+     *             test_CurrentPrice_PriceIncrementSteps
+     * ================================================================================
+     */
+    /*
+    /// @notice Tests the currentPrice function with increasing excess supply
+    /// @dev Verifies that the price increases linearly with each additional token above ideal supply
+    function test_CurrentPrice_07_PriceIncrementSteps() public {
+        // Set time to create an ideal supply of 24 tokens
+        vm.warp(deploymentTime + 24 hours);
+        uint256 idealSupply = 24;
+
+        // Test with different excess amounts
+        uint256[] memory excessAmounts = new uint256[](5);
+        excessAmounts[0] = 1; // 1 token above ideal
+        excessAmounts[1] = 5; // 5 tokens above ideal
+        excessAmounts[2] = 10; // 10 tokens above ideal
+        excessAmounts[3] = 20; // 20 tokens above ideal
+        excessAmounts[4] = 50; // 50 tokens above ideal
+
+        for (uint i = 0; i < excessAmounts.length; i++) {
+            // Reset contract state
+            vm.revertToState(snapshotId);
+            snapshotId = vm.snapshotState();
+
+            // Mint idealSupply + excess tokens
+            _mintMultipleNFTs(idealSupply + excessAmounts[i]);
+
+            // Calculate expected price
+            uint256 expectedPrice = artProject.BASE_PRICE() +
+                (excessAmounts[i] * artProject.PRICE_INCREMENT());
+
+            // Get actual price
+            uint256 actualPrice = artProject.currentPrice();
+
+            // Verify price
+            assertEq(
+                actualPrice,
+                expectedPrice,
+                string(
+                    abi.encodePacked(
+                        "Price incorrect with ",
+                        vm.toString(excessAmounts[i]),
+                        " excess tokens"
+                    )
+                )
+            );
+        }
+    }
+*/
+    /**
+     * ================================================================================
+     *             test_CurrentPrice_TokensPerHourCalculation
+     * ================================================================================
+     */
+
+    /// @notice Tests the currentPrice function's tokens per hour calculation
+    /// @dev Verifies that the ideal supply is calculated correctly based on TOKENS_PER_DAY
+    function test_CurrentPrice_08_TokensPerHourCalculation() public {
+        // Get TOKENS_PER_DAY
+        uint256 tokensPerDay = artProject.TOKENS_PER_DAY();
+        uint256 tokensPerHour = tokensPerDay / 24;
+
+        // Test for exactly 1 hour
+        vm.warp(deploymentTime + 1 hours);
+
+        // Expected ideal supply after 1 hour
+        uint256 expectedIdealSupply = tokensPerHour;
+
+        // Mint exactly tokensPerHour + 1 tokens
+        _mintMultipleNFTs(tokensPerHour + 1);
+
+        // Expected price with 1 excess token
+        uint256 expectedPrice = artProject.BASE_PRICE() +
+            artProject.PRICE_INCREMENT();
+
+        // Get actual price
+        uint256 actualPrice = artProject.currentPrice();
+
+        // Verify price
+        assertEq(
+            actualPrice,
+            expectedPrice,
+            "Price incorrect for 1 hour calculation"
+        );
+    }
+
+    /**
+     * ================================================================================
+     *             HELPER FUNCTIONS
+     * ================================================================================
+     */
+
+    /// @notice Helper function to mint multiple NFTs
+    /// @param count Number of NFTs to mint
+    /// @dev Mints the specified number of NFTs with unique art data
+    function _mintMultipleNFTs(uint256 count) internal {
+        for (uint256 i = 0; i < count; i++) {
+            // Create a unique user for each mint
+            address user = address(uint160(0x1000 + i));
+            vm.deal(user, 10 ether);
+
+            // Give user pixels
+            _giveUserPixels(user, 100);
+
+            // Start minting
+            vm.startPrank(user);
+            artProject.startMinting{value: artProject.START_MINTING_FEE()}();
+
+            // Create unique art for each user
+            bytes32 artData = bytes32(
+                uint256(
+                    0x00000000000000000000000000000000000000000000000000000000FFFF0000
+                ) + i
+            );
+
+            // Mint NFT
+            artProject.mintNFT{value: artProject.currentPrice()}(artData);
+            vm.stopPrank();
+        }
+    }
+}
