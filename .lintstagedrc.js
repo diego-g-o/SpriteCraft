@@ -8,7 +8,7 @@ const buildNextEslintCommand = (filenames) =>
 const checkTypesNextCommand = () => "yarn next:check-types";
 
 const buildHardhatEslintCommand = (filenames) =>
-  `yarn hardhat:lint-staged --fix ${filenames
+  `yarn workspace @se-2/hardhat eslint --fix ${filenames
     .map((f) => path.relative(path.join("packages", "hardhat"), f))
     .join(" ")}`;
 

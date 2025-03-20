@@ -25,3 +25,6 @@ dist
 # forge's Oppenzeppelin
 lib/openzeppelin-contracts/
 lib/forge-std/
+
+# project spec
+PROJECT-SPEC.md 
